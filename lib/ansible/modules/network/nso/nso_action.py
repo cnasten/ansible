@@ -158,25 +158,24 @@ def main():
     )
     p = module.params
 
-    client = connect(p)
-    nso_action = NsoAction(
-        module.check_mode, client,
-        p['path'],
-        p['input'],
-        p['output_required'],
-        p['output_invalid'],
-        p['validate_strict'])
     try:
-        verify_version(client)
+        client = connect(p)
+        with client:
+            nso_action = NsoAction(
+                module.check_mode, client,
+                p['path'],
+                p['input'],
+                p['output_required'],
+                p['output_invalid'],
+                p['validate_strict'])
+            verify_version(client)
 
-        output = nso_action.main()
-        client.logout()
-        module.exit_json(changed=True, output=output)
+            output = nso_action.main()
+            module.exit_json(changed=True, output=output)
+
     except NsoException as ex:
-        client.logout()
         module.fail_json(msg=ex.message)
     except ModuleFailException as ex:
-        client.logout()
         module.fail_json(msg=ex.message)
 
 

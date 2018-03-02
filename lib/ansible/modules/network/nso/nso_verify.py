@@ -162,27 +162,24 @@ def main():
     )
     p = module.params
 
-    client = connect(p)
-    nso_verify = NsoVerify(client, p['data'])
     try:
-        verify_version(client)
+        client = connect(p)
+        with client:
+            nso_verify = NsoVerify(client, p['data'])
+            verify_version(client)
 
-        violations = nso_verify.main()
-        client.logout()
-
-        num_violations = len(violations)
-        if num_violations > 0:
-            msg = '{0} value{1} differ'.format(
-                num_violations, num_violations > 1 and 's' or '')
-            module.fail_json(msg=msg, violations=violations)
-        else:
-            module.exit_json(changed=False)
+            violations = nso_verify.main()
+            num_violations = len(violations)
+            if num_violations > 0:
+                msg = '{0} value{1} differ'.format(
+                    num_violations, num_violations > 1 and 's' or '')
+                module.fail_json(msg=msg, violations=violations)
+            else:
+                module.exit_json(changed=False)
 
     except NsoException as ex:
-        client.logout()
         module.fail_json(msg=ex.message)
     except ModuleFailException as ex:
-        client.logout()
         module.fail_json(msg=ex.message)
 
 

@@ -109,21 +109,19 @@ def main():
     )
     p = module.params
 
-    client = connect(p)
-    nso_show = NsoShow(
-        module.check_mode, client,
-        p['path'], p['operational'])
     try:
-        verify_version(client, NsoShow.REQUIRED_VERSIONS)
+        client = connect(p)
+        with client:
+            nso_show = NsoShow(
+                module.check_mode, client,
+                p['path'], p['operational'])
+            verify_version(client, NsoShow.REQUIRED_VERSIONS)
 
-        output = nso_show.main()
-        client.logout()
-        module.exit_json(changed=False, output=output)
+            output = nso_show.main()
+            module.exit_json(changed=False, output=output)
     except NsoException as ex:
-        client.logout()
         module.fail_json(msg=ex.message)
     except ModuleFailException as ex:
-        client.logout()
         module.fail_json(msg=ex.message)
 
 

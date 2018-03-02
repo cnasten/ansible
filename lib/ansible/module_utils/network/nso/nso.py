@@ -20,10 +20,11 @@
 
 
 from ansible.module_utils.basic import env_fallback
-from ansible.module_utils.urls import open_url
+from ansible.module_utils.urls import open_url, urllib_request
 
 import json
 import re
+import socket
 
 try:
     unicode
@@ -54,14 +55,14 @@ class State(object):
 
 
 class ModuleFailException(Exception):
-    def __init__(self, message):
-        super(ModuleFailException, self).__init__(message)
+    def __init__(self, message, ex=None):
+        super(ModuleFailException, self).__init__(message, ex)
         self.message = message
 
 
 class NsoException(Exception):
-    def __init__(self, message, error):
-        super(NsoException, self).__init__(message)
+    def __init__(self, message, error, ex=None):
+        super(NsoException, self).__init__(message, ex)
         self.message = message
         self.error = error
 
@@ -75,6 +76,14 @@ class JsonRpc(object):
         self._trans = {}
         self._headers = {'Content-Type': 'application/json'}
         self._conn = None
+        self._logged_in = False
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        if self._logged_in:
+            self.logout()
 
     def login(self, user, passwd):
         payload = {
@@ -84,9 +93,13 @@ class JsonRpc(object):
         resp, resp_json = self._call(payload)
         self._headers['Cookie'] = resp.headers['set-cookie']
 
+        self._logged_in = True
+
     def logout(self):
         payload = {'method': 'logout', 'params': {}}
         self._call(payload)
+
+        self._logged_in = False
 
     def get_system_setting(self, setting):
         payload = {'method': 'get_system_setting', 'params': {'operation': setting}}
@@ -220,15 +233,35 @@ class JsonRpc(object):
             payload['jsonrpc'] = '2.0'
 
         data = json.dumps(payload)
-        resp = open_url(
-            self._url, timeout=self._timeout,
-            method='POST', data=data, headers=self._headers)
+        try:
+            resp = open_url(
+                self._url, timeout=self._timeout,
+                method='POST', data=data, headers=self._headers)
+        except socket.timeout as ex:
+            raise ModuleFailException(
+                'request timed out against NSO at {0}'.format(self._url), ex)
+        except urllib_request.URLError as ex:
+            raise ModuleFailException(
+                'failed to connect to NSO at {0} due to: {1}'.format(self._url, ex.reason), ex)
+        except Exception as ex:
+            ex_msg = getattr(ex, 'message', str(ex))
+            raise ModuleFailException(
+                'failed to connect to NSO at {0} due to: {1}'.format(self._url, ex_msg), ex)
+
         if resp.code != 200:
             raise NsoException(
                 'NSO returned HTTP code {0}, expected 200'.format(resp.status), {})
 
-        resp_body = resp.read()
-        resp_json = json.loads(resp_body)
+        try:
+            resp_body = resp.read()
+        except Exception as ex:
+            raise ModuleFailException(
+                'failed to read data from NSO at {0} due to: {1}'.format(self._url, ex.message), ex)
+
+        try:
+            resp_json = json.loads(resp_body)
+        except ValueError as ex:
+            raise ModuleFailException('NSO response is not a valid JSON object', ex)
 
         if 'error' in resp_json:
             self._handle_call_error(payload, resp_json)

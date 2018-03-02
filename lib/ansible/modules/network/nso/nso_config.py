@@ -254,23 +254,20 @@ def main():
     )
     p = module.params
 
-    client = connect(p)
-    nso_config = NsoConfig(module.check_mode, client, p['data'])
     try:
-        verify_version(client)
+        client = connect(p)
+        with client:
+            nso_config = NsoConfig(module.check_mode, client, p['data'])
+            verify_version(client)
 
-        changes, diffs = nso_config.main()
-        client.logout()
-
-        changed = len(changes) > 0
-        module.exit_json(
-            changed=changed, changes=changes, diffs=diffs)
+            changes, diffs = nso_config.main()
+            changed = len(changes) > 0
+            module.exit_json(
+                changed=changed, changes=changes, diffs=diffs)
 
     except NsoException as ex:
-        client.logout()
         module.fail_json(msg=ex.message)
     except ModuleFailException as ex:
-        client.logout()
         module.fail_json(msg=ex.message)
 
 

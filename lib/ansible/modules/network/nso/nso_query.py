@@ -104,21 +104,19 @@ def main():
     )
     p = module.params
 
-    client = connect(p)
-    nso_query = NsoQuery(
-        module.check_mode, client,
-        p['xpath'], p['fields'])
     try:
-        verify_version(client, NsoQuery.REQUIRED_VERSIONS)
+        client = connect(p)
+        with client:
+            nso_query = NsoQuery(
+                module.check_mode, client,
+                p['xpath'], p['fields'])
+            verify_version(client, NsoQuery.REQUIRED_VERSIONS)
 
-        output = nso_query.main()
-        client.logout()
-        module.exit_json(changed=False, output=output)
+            output = nso_query.main()
+            module.exit_json(changed=False, output=output)
     except NsoException as ex:
-        client.logout()
         module.fail_json(msg=ex.message)
     except ModuleFailException as ex:
-        client.logout()
         module.fail_json(msg=ex.message)
 
 
