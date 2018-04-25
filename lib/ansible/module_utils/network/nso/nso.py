@@ -46,6 +46,7 @@ class State(object):
     SET = 'set'
     PRESENT = 'present'
     ABSENT = 'absent'
+    REPLACE = 'replace'
     CHECK_SYNC = 'check-sync'
     DEEP_CHECK_SYNC = 'deep-check-sync'
     IN_SYNC = 'in-sync'
@@ -360,6 +361,7 @@ class ValueBuilder(object):
         self._module_prefix_map_cache = None
         self._values = []
         self._values_dirty = False
+        self._replace_paths = set()
 
     def build(self, parent, maybe_qname, value, schema=None):
         qname, name = self.get_prefix_name(maybe_qname)
@@ -376,7 +378,7 @@ class ValueBuilder(object):
         elif self._is_leaf(schema):
             deps = schema.get('deps', [])
             if self._is_empty_leaf(schema):
-                exists = self._client.exists(path)
+                exists = self._exists(path)
                 if exists and value != [None]:
                     self._add_value(path, State.ABSENT, None, deps)
                 elif not exists and value == [None]:
@@ -407,6 +409,9 @@ class ValueBuilder(object):
     def values(self):
         if self._values_dirty:
             self._values = ValueBuilder.sort_values(self._values)
+            for replaced_path in self._replace_paths:
+                self._values.insert(
+                    0, ValueBuilder.Value(replaced_path, State.ABSENT, None, []))
             self._values_dirty = False
 
         return self._values
@@ -475,11 +480,17 @@ class ValueBuilder(object):
         keys = schema.get('key', [])
         for dict_key, dict_value in value.items():
             qname, name = self.get_prefix_name(dict_key)
-            if dict_key in ('__state', ) or name in keys:
-                continue
 
-            child_schema = self._find_child(path, schema, qname)
-            self.build(path, dict_key, dict_value, child_schema)
+            if dict_key == '__state':
+                # replace containers only, list is replaced in build_list
+                if self._is_container(schema) and dict_value == State.REPLACE:
+                    self._add_replace_path(path)
+            elif name in keys:
+                # skip keys, set as values
+                pass
+            else:
+                child_schema = self._find_child(path, schema, qname)
+                self.build(path, dict_key, dict_value, child_schema)
 
     def _build_leaf_list(self, path, schema, value):
         deps = schema.get('deps', [])
@@ -490,7 +501,7 @@ class ValueBuilder(object):
                 if 'identityref' in entry_type:
                     entry, t_entry = self.get_prefix_name(entry)
                 entry_path = '{0}{{{1}}}'.format(path, entry)
-                if not self._client.exists(entry_path):
+                if not self._exists(entry_path):
                     self._add_value(entry_path, State.ABSENT, None, deps)
         else:
             # remove leaf list if treated as a list and then re-create the
@@ -508,10 +519,16 @@ class ValueBuilder(object):
         for entry in value:
             entry_key = self._build_key(path, entry, schema['key'])
             entry_path = '{0}{{{1}}}'.format(path, entry_key)
-            entry_state = entry.get('__state', 'present')
-            entry_exists = self._client.exists(entry_path)
+            entry_state = entry.get('__state', State.PRESENT)
+            entry_exists = self._exists(entry_path)
 
-            if entry_state == 'absent':
+            if entry_state == State.REPLACE:
+                if entry_exists:
+                    self._add_replace_path(entry_path)
+                entry_exists = False
+                entry_state = State.PRESENT
+
+            if entry_state == State.ABSENT:
                 if entry_exists:
                     self._add_value(entry_path, State.ABSENT, None, deps)
             else:
@@ -668,6 +685,9 @@ class ValueBuilder(object):
                     return choice_child_schema
         return None
 
+    def _is_container(self, schema):
+        return schema.get('kind', None) == 'container'
+
     def _is_leaf_list(self, schema):
         return schema.get('kind', None) == 'leaf-list'
 
@@ -680,6 +700,21 @@ class ValueBuilder(object):
         return (schema.get('kind', None) == 'leaf' and
                 schema['type'].get('primitive', False) and
                 schema['type'].get('name', '') == 'empty')
+
+    def _add_replace_path(self, path):
+        self._values_dirty = True
+        self._replace_paths.add(path)
+
+    def _exists(self, path):
+        if path in self._replace_paths:
+            return False
+
+        for replaced_path in self._replace_paths:
+            if (path.startswith(replaced_path) and
+                    path[len(replaced_path)] == '/'):
+                return False
+
+        return self._client.exists(path)
 
 
 def connect(params):

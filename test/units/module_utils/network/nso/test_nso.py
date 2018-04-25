@@ -582,6 +582,93 @@ class TestValueBuilder(unittest.TestCase):
 
         self.assertEqual(0, len(calls))
 
+    @patch('ansible.module_utils.network.nso.nso.open_url')
+    def test_replace_container(self, open_url_mock):
+        calls = []
+        open_url_mock.side_effect = lambda *args, **kwargs: mock_call(calls, *args, **kwargs)
+
+        parent = '/an:id-name-values'
+        schema_data = json.loads(
+            SCHEMA_DATA['/an:id-name-values'])
+        schema = schema_data['data']
+
+        vb = nso.ValueBuilder(nso.JsonRpc('http://localhost:8080/jsonrpc', 10))
+        vb.build(parent, None, {'__state': 'replace'}, schema)
+        self.assertEquals(1, len(vb.values))
+
+        value = vb.values[0]
+        self.assertEquals('/an:id-name-values', value.path)
+        self.assertEquals('absent', value.state)
+        self.assertEquals(None, value.value)
+
+        self.assertEqual(0, len(calls))
+
+    @patch('ansible.module_utils.network.nso.nso.open_url')
+    def test_replace_new_list_entry(self, open_url_mock):
+        calls = [
+            MockResponse('new_trans', {}, 200, '{"result": {"th": 1}}'),
+            get_schema_response('/test:test'),
+            MockResponse('exists', {'path': '/test:test{replace}'}, 200, '{"result": {"exists": false}}'),
+            MockResponse('get_system_setting', {'operation': 'version'}, 200, '{"result": "4.4"}')
+        ]
+        open_url_mock.side_effect = lambda *args, **kwargs: mock_call(calls, *args, **kwargs)
+
+        parent = "/test:test"
+        schema_data = json.loads(
+            SCHEMA_DATA['/test:test'])
+        schema = schema_data['data']
+
+        vb = nso.ValueBuilder(nso.JsonRpc('http://localhost:8080/jsonrpc', 10))
+        vb.build(parent, None, [{'name': 'replace', 'device-list': ['ce0'], '__state': 'replace'}], schema)
+        self.assertEquals(2, len(vb.values))
+
+        value = vb.values[0]
+        self.assertEquals('{0}{{replace}}'.format(parent), value.path)
+        self.assertEquals('present', value.state)
+        self.assertEquals(None, value.value)
+
+        value = vb.values[1]
+        self.assertEquals('{0}{{replace}}/device-list'.format(parent), value.path)
+        self.assertEquals('set', value.state)
+        self.assertEquals(['ce0'], value.value)
+
+        self.assertEqual(0, len(calls))
+
+    @patch('ansible.module_utils.network.nso.nso.open_url')
+    def test_replace_existing_list_entry(self, open_url_mock):
+        calls = [
+            MockResponse('new_trans', {}, 200, '{"result": {"th": 1}}'),
+            get_schema_response('/test:test'),
+            MockResponse('exists', {'path': '/test:test{replace}'}, 200, '{"result": {"exists": true}}'),
+            MockResponse('get_system_setting', {'operation': 'version'}, 200, '{"result": "4.4"}')
+        ]
+        open_url_mock.side_effect = lambda *args, **kwargs: mock_call(calls, *args, **kwargs)
+
+        parent = "/test:test"
+        schema_data = json.loads(
+            SCHEMA_DATA['/test:test'])
+        schema = schema_data['data']
+
+        vb = nso.ValueBuilder(nso.JsonRpc('http://localhost:8080/jsonrpc', 10))
+        vb.build(parent, None, [{'name': 'replace', 'device-list': ['ce0'], '__state': 'replace'}], schema)
+        self.assertEquals(3, len(vb.values))
+        value = vb.values[0]
+        self.assertEquals('{0}{{replace}}'.format(parent), value.path)
+        self.assertEquals('absent', value.state)
+        self.assertEquals(None, value.value)
+
+        value = vb.values[1]
+        self.assertEquals('{0}{{replace}}'.format(parent), value.path)
+        self.assertEquals('present', value.state)
+        self.assertEquals(None, value.value)
+
+        value = vb.values[2]
+        self.assertEquals('{0}{{replace}}/device-list'.format(parent), value.path)
+        self.assertEquals('set', value.state)
+        self.assertEquals(['ce0'], value.value)
+
+        self.assertEqual(0, len(calls))
+
 
 class TestVerifyVersion(unittest.TestCase):
     def test_valid_versions(self):
