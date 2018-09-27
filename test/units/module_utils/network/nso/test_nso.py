@@ -387,6 +387,27 @@ class TestJsonRpc(unittest.TestCase):
 
 class TestValueBuilder(unittest.TestCase):
     @patch('ansible.module_utils.network.nso.nso.open_url')
+    def test_quote_key(self, open_url_mock):
+        calls = [
+            MockResponse('new_trans', {}, 200, '{"result": {"th": 1}}'),
+            get_schema_response('/test:test'),
+            MockResponse('exists', {'path': '/test:test{"key with space"}'}, 200, '{"result": {"exists": true}}')
+        ]
+        open_url_mock.side_effect = lambda *args, **kwargs: mock_call(calls, *args, **kwargs)
+
+        parent = "/test:test"
+        schema_data = json.loads(SCHEMA_DATA['/test:test'])
+        schema = schema_data['data']
+
+        vb = nso.ValueBuilder(nso.JsonRpc('http://localhost:8080/jsonrpc', 10))
+        vb.build(parent, None, [{'name': 'key with space', 'direct-child': 'value'}], schema)
+        self.assertEquals(1, len(vb.values))
+        value = vb.values[0]
+        self.assertEquals('{0}{{"key with space"}}/direct-child'.format(parent), value.path)
+
+        self.assertEqual(0, len(calls))
+
+    @patch('ansible.module_utils.network.nso.nso.open_url')
     def test_identityref_leaf(self, open_url_mock):
         calls = [
             MockResponse('new_trans', {}, 200, '{"result": {"th": 1}}'),

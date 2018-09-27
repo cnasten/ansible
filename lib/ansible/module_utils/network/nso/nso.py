@@ -515,7 +515,7 @@ class ValueBuilder(object):
             q_key.append(c)
         q_key = ''.join(q_key)
         if ' ' in q_key:
-            return '{0}'.format(q_key)
+            return '"{0}"'.format(q_key)
         return q_key
 
     def _find_child(self, path, schema, qname):
